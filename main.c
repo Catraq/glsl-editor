@@ -32,7 +32,7 @@ int compile_shader(GLuint shader, const u8 *source, u32 size)
 {
 	int result = 0;
 
-	glShaderSource(shader, 1, (const GLchar**) &source, &size);
+	glShaderSource(shader, 1, (const GLchar**) &source, (const GLint*)&size);
        	glCompileShader(shader);
 	
 	GLint shader_status;
@@ -173,7 +173,6 @@ int shader_uniforms_locate(GLint program, struct shader_uniforms *uniforms, int 
 	
 	uniforms->resolution 	= shader_uniform_location(program, "resolution", verbose);
 	uniforms->mouse 	= shader_uniform_location(program, "mouse", verbose);
-	uniforms->scroll 	= shader_uniform_location(program, "scroll", verbose);
 	uniforms->time		= shader_uniform_location(program, "time", verbose);
 
 	return(result);
@@ -200,12 +199,12 @@ int main(int argc, char *argv[])
 {
 	int result = 0;
 	
-	int 	fullscreen 	= 0;
-	int 	verbose 	= 0;
-	int	width 		= 640,
-		height 		= 480;
-	int 	reload_interval = 1000;
-	char 	*filename 	= NULL;	
+	int 	fullscreen 		= 0;
+	int 	verbose 		= 0;
+	int	width 			= 640,
+		height 			= 480;
+	int 	reload_interval_ms 	= 1000;
+	char 	*filename 		= NULL;	
 	
 	if(argc < 2){
 		fprintf(stderr, usage_str);
@@ -229,9 +228,9 @@ int main(int argc, char *argv[])
 
 		case  't':
 			if(optarg){
-				reload_interval = atoi(optarg);
-				if(reload_interval < 0)
-					reload_interval = 0;
+				reload_interval_ms = atoi(optarg);
+				if(reload_interval_ms < 0)
+					reload_interval_ms = 0;
 			}
 		break;
 
@@ -352,17 +351,14 @@ int main(int argc, char *argv[])
 	
 
 	struct shader_uniforms uniforms;
-	shader_uniforms_locate(shader_program, &uniforms, 1);
+	shader_uniforms_locate(shader_program, &uniforms, 1 /* verbose */);
 
 
 	glDisable(GL_DEPTH_TEST);
 	
 	int recently_reloaded = 0;
-	
-	float scroll;
       	double mouse_x, mouse_y;	
 	clock_t reload_timer = clock();
-
 	while(!glfwWindowShouldClose(window))
 	{
 		//Get screen size and update uniform 
@@ -390,18 +386,15 @@ int main(int argc, char *argv[])
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 		
 
-
 			
 		int reload = 0;
-		int reload_verbose = 1;
+		int reload_verbose = 0;
 		int last_reload_ms = (float)((clock() - reload_timer)/(float)(CLOCKS_PER_SEC/100000));
 
-		if(reload_interval){
-			printf("%i %i \n", last_reload_ms, reload_interval);
-			if(reload_interval < last_reload_ms){
+		if(reload_interval_ms){
+			if(reload_interval_ms < last_reload_ms){
 				reload = 1;
 				reload_verbose = verbose;
-				reload_timer = clock();
 			}
 		}
 
@@ -412,6 +405,7 @@ int main(int argc, char *argv[])
 			//Used to make sure 1 click eq 1 reload.
 			if(!recently_reloaded){
 				reload = 1;
+				reload_verbose = 1;
 				recently_reloaded = 1;
 				fprintf(stdout, "Reloading shader.\n");
 			}
@@ -425,8 +419,10 @@ int main(int argc, char *argv[])
 			loaded = load_fragment_file_to_program(filename, shader_program, fragment_shader);
 			if(loaded < 0){
 			}else{
-				shader_uniforms_locate(shader_program, &uniforms, verbose);
+				shader_uniforms_locate(shader_program, &uniforms, reload_verbose);
 			}
+
+			reload_timer = clock();
 		}
 
 		glfwPollEvents();
