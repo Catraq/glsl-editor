@@ -28,7 +28,7 @@ const u8 vertex_shader_source[] =
 	"}						\n"
 };
 
-int compile_shader(GLuint shader, const u8 *source, u32 size)
+int compile_shader(GLuint shader, const u8 *source, u32 size, int verbose)
 {
 	int result = 0;
 
@@ -42,7 +42,9 @@ int compile_shader(GLuint shader, const u8 *source, u32 size)
 		GLsizei log_length = 0;
 		GLchar error_buffer[1024];
 		glGetShaderInfoLog(shader, 1024, &log_length, error_buffer);
- 	       	fprintf(stderr, "%s \n", error_buffer);
+
+		if(verbose)
+ 	       		fprintf(stderr, "%s \n", error_buffer);
 
 		result = -1;
 	}
@@ -102,17 +104,19 @@ error:
 }
 
 
-int load_fragment_file_to_program(const char *filename, GLuint program, GLuint shader)
+int load_fragment_file_to_program(const char *filename, GLuint program, GLuint shader, int verbose)
 {	
 	int result = 0;
 
 	struct file_desc desc = load_file(filename);
 	if(desc.buffer)
 	{
-		int compiled = compile_shader(shader, desc.buffer, desc.size);
+		int compiled = compile_shader(shader, desc.buffer, desc.size, verbose);
 		if(compiled < 0)
 		{
-			fprintf(stderr, "could not compile shader file.\n");
+			if(verbose)
+				fprintf(stderr, "could not compile shader file.\n");
+
 			result = compiled;
 		}else{
 			glAttachShader(program, shader);
@@ -122,7 +126,8 @@ int load_fragment_file_to_program(const char *filename, GLuint program, GLuint s
 			glGetProgramiv(program, GL_LINK_STATUS, &state);
 			if(state == GL_FALSE)
 			{
-				fprintf(stderr, "could not link shader program.\n");
+				if(verbose)
+					fprintf(stderr, "could not link shader program.\n");
 
 				GLint length;
 				glGetProgramiv(program, GL_INFO_LOG_LENGTH, &length);
@@ -130,7 +135,8 @@ int load_fragment_file_to_program(const char *filename, GLuint program, GLuint s
 				GLsizei real_length = 0;
 				GLchar buffer[4092];
 				glGetProgramInfoLog(program, 4092, &real_length, buffer);
-				fprintf(stderr, "%s \n", buffer);	
+				if(verbose)
+					fprintf(stderr, "%s \n", buffer);	
 				
 				result = -1;
 
@@ -296,8 +302,9 @@ int main(int argc, char *argv[])
 	glfwMakeContextCurrent(window);
 
 	glewExperimental = GL_TRUE;
-	if(glewInit() != GLEW_OK){
-		fprintf(stderr, "glewInit(): failed \n");
+	GLenum glew_init_res;
+	if((glew_init_res == glewInit())){
+		fprintf(stderr, "glewInit(): failed, %s \n", glewGetErrorString(glew_init_res));
 		goto exit;
 	}
 
@@ -331,7 +338,7 @@ int main(int argc, char *argv[])
 	GLuint shader_program = glCreateProgram();	
 	GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);	
 
-	int compiled = compile_shader(vertex_shader, vertex_shader_source, sizeof(vertex_shader_source));	
+	int compiled = compile_shader(vertex_shader, vertex_shader_source, sizeof(vertex_shader_source), 1);	
 	if(compiled < 0){
 		fprintf(stderr, "Could not compile build in shader. \n");
 		goto exit;
@@ -341,7 +348,7 @@ int main(int argc, char *argv[])
 
 
 	GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-	int loaded = load_fragment_file_to_program(filename, shader_program, fragment_shader);
+	int loaded = load_fragment_file_to_program(filename, shader_program, fragment_shader, 1);
 	if(loaded < 0){
 		fprintf(stdout, "Failed to load fragment shader.\n");
 		//TODO: add fallback shader.
@@ -416,7 +423,7 @@ int main(int argc, char *argv[])
 		
 		if(reload){
 			
-			loaded = load_fragment_file_to_program(filename, shader_program, fragment_shader);
+			loaded = load_fragment_file_to_program(filename, shader_program, fragment_shader, reload_verbose);
 			if(loaded < 0){
 			}else{
 				shader_uniforms_locate(shader_program, &uniforms, reload_verbose);
