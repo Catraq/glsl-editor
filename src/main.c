@@ -2,12 +2,14 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <stddef.h>
+#include <assert.h>
 
 #include <unistd.h>
 #include <time.h>
 #include <error.h>
 
 #include <GL/glew.h>
+#include <GL/glu.h>
 #include <GLFW/glfw3.h>
 
 
@@ -27,6 +29,53 @@ const u8 vertex_shader_source[] =
 	"	texcoord = (in_position+1.0)/2.0;	\n"
 	"}						\n"
 };
+
+char *load_file(const char *filename, u32 *size)
+{
+	assert(filename && size);
+
+	u32 s;
+	FILE *fp = fopen(filename, "rb");
+	if(!fp)
+	{
+		perror("Could not open file");
+		goto error;
+	}
+
+	
+	fseek(fp, 0, SEEK_END);
+	s= ftell(fp);
+	fseek(fp, 0, SEEK_SET);
+
+	char *buffer = malloc(s);
+	if(!buffer)
+	{
+		perror("could not allocate memory");
+		fclose(fp);
+		goto error;
+	}
+
+	u32 read = fread(buffer, 1, s, fp);
+	if(read != s)
+	{
+		perror("could not read file");
+		fclose(fp);
+		goto error;
+	}
+	
+	fclose(fp);
+
+	*size = s;
+	return(buffer);
+
+error:
+	free(buffer);
+
+	buffer = NULL;
+	*size = 0;
+
+	return buffer;
+}
 
 int compile_shader(GLuint shader, const u8 *source, u32 size, int verbose)
 {
@@ -53,72 +102,26 @@ int compile_shader(GLuint shader, const u8 *source, u32 size, int verbose)
 	return(result);
 }
 
-struct file_desc
-{
-	u32 	 size;
-	u8 	*buffer;
-};
-
-struct file_desc load_file(const char *filename)
-{
-	struct file_desc desc = {};	
-
-	FILE *fp = fopen(filename, "rb");
-	if(!fp)
-	{
-		perror("Could not open file");
-		goto error;
-	}
-
-	
-	fseek(fp, 0, SEEK_END);
-	desc.size = ftell(fp);
-	fseek(fp, 0, SEEK_SET);
-
-	desc.buffer = malloc(desc.size);
-	if(!desc.buffer)
-	{
-		perror("could not allocate memory");
-		fclose(fp);
-		goto error;
-	}
-
-	u32 read = fread(desc.buffer, 1, desc.size, fp);
-	if(read != desc.size)
-	{
-		perror("could not read file");
-		fclose(fp);
-		goto error;
-	}
-	
-	fclose(fp);
-	return(desc);
-
-error:
-	free(desc.buffer);
-
-	desc.buffer = NULL;
-	desc.size = 0;
-
-	return(desc);
-}
 
 
 int load_fragment_file_to_program(const char *filename, GLuint program, GLuint shader, int verbose)
 {	
-	int result = 0;
-
-	struct file_desc desc = load_file(filename);
-	if(desc.buffer)
+	int result = 1;
+	
+	u32 size = 0;
+	char *buffer = load_file(filename, &size);
+	if(buffer)
 	{
-		int compiled = compile_shader(shader, desc.buffer, desc.size, verbose);
+		int compiled = compile_shader(shader, buffer, size, verbose);
 		if(compiled < 0)
 		{
 			if(verbose)
 				fprintf(stderr, "could not compile shader file.\n");
 
-			result = compiled;
-		}else{
+			result = -1;	
+		}
+		else
+		{
 			glAttachShader(program, shader);
 			glLinkProgram(program);
 			
@@ -143,7 +146,7 @@ int load_fragment_file_to_program(const char *filename, GLuint program, GLuint s
 			}
 			glDetachShader(program, shader);
 		}
-		free(desc.buffer);
+		free(buffer);
 	}else{
 		fprintf(stderr, "could not load shader file.\n");
 	}
@@ -228,8 +231,6 @@ int main(int argc, char *argv[])
 			fullscreen = 1;		
 		break;
 	
-		case 'v':
-			verbose = 1;
 		break;
 
 		case  't':
@@ -336,8 +337,9 @@ int main(int argc, char *argv[])
 
 
 	GLuint shader_program = glCreateProgram();	
-	GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);	
 
+	//Vertex shader for rendering quad. 
+	GLuint vertex_shader = glCreateShader(GL_VERTEX_SHADER);	
 	int compiled = compile_shader(vertex_shader, vertex_shader_source, sizeof(vertex_shader_source), 1);	
 	if(compiled < 0){
 		fprintf(stderr, "Could not compile build in shader. \n");
@@ -346,19 +348,20 @@ int main(int argc, char *argv[])
 	glAttachShader(shader_program, vertex_shader);
 
 
-
+	
+	//Load fragmentshader from file 
+	const int frag_shader_init_verbose = 1;
 	GLuint fragment_shader = glCreateShader(GL_FRAGMENT_SHADER);
-	int loaded = load_fragment_file_to_program(filename, shader_program, fragment_shader, 1);
-	if(loaded < 0){
+	result = load_fragment_file_to_program(filename, shader_program, fragment_shader, frag_shader_init_verbose);
+	if(result < 0){
 		fprintf(stdout, "Failed to load fragment shader.\n");
 		//TODO: add fallback shader.
-	
 	}
 	glUseProgram(shader_program);
 	
 
 	struct shader_uniforms uniforms;
-	shader_uniforms_locate(shader_program, &uniforms, 1 /* verbose */);
+	shader_uniforms_locate(shader_program, &uniforms, frag_shader_init_verbose);
 
 
 	glDisable(GL_DEPTH_TEST);
@@ -368,27 +371,33 @@ int main(int argc, char *argv[])
 	clock_t reload_timer = clock();
 	while(!glfwWindowShouldClose(window))
 	{
-		//Get screen size and update uniform 
+		//Screensize
 		int width, height;
 		glfwGetFramebufferSize(window, &width, &height);
-		glUniform2f(uniforms.resolution, (float)width, (float)height);	
-		
-		//Get cursor pos, scale, map  and set uniform	
+	
+
+		//Mouse position in screen space. 
 		glfwGetCursorPos(window, &mouse_x, &mouse_y);
 		float x, y;
 		x = (mouse_x-(width/2.0f))/width;
 		y = (mouse_y-(height/2.0f))/height;
-		glUniform2f(uniforms.mouse, x, y);	
 
-		//Get and set time 
+		//CPU time 
 		float time = (float)clock()/CLOCKS_PER_SEC;
-		glUniform1f(uniforms.time, time);
+
+
 		
-		//Render
+		//Update shader unfiforms 
+		glUniform2f(uniforms.resolution, (float)width, (float)height);	
+		glUniform2f(uniforms.mouse, x, y);	
+		glUniform1f(uniforms.time, time);
+	
+		//Render clear. 	
 		glViewport(0,0, width, height);
 		glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 		
+		//Render quad. 
 		glBindVertexArray(vertex_array);
 		glDrawArrays(GL_TRIANGLES, 0, 6);
 		
@@ -408,8 +417,7 @@ int main(int argc, char *argv[])
 	
 		int reload_key = glfwGetKey(window, GLFW_KEY_R);
 		if(reload_key == GLFW_PRESS){
-		
-			//Used to make sure 1 click eq 1 reload.
+			//Avoid reloading while key is pressed. 	
 			if(!recently_reloaded){
 				reload = 1;
 				reload_verbose = 1;
@@ -423,9 +431,9 @@ int main(int argc, char *argv[])
 		
 		if(reload){
 			
-			loaded = load_fragment_file_to_program(filename, shader_program, fragment_shader, reload_verbose);
-			if(loaded < 0){
-			}else{
+			result = load_fragment_file_to_program(filename, shader_program, fragment_shader, reload_verbose);
+			if(result < 0){}
+			else{
 				shader_uniforms_locate(shader_program, &uniforms, reload_verbose);
 			}
 
