@@ -303,9 +303,9 @@ int main(int argc, char *argv[])
 	glfwMakeContextCurrent(window);
 
 	glewExperimental = GL_TRUE;
-	GLenum glew_init_res;
-	if((glew_init_res == glewInit())){
-		fprintf(stderr, "glewInit(): failed, %s \n", glewGetErrorString(glew_init_res));
+	GLenum err = glewInit();
+	if(err != GLEW_OK){
+		fprintf(stderr, "glewInit(): failed, %s \n", glewGetErrorString(err));
 		goto exit;
 	}
 
